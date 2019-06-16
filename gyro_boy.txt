@@ -1,0 +1,139 @@
+Motor A, D; //A is left motor, D is right motor
+GyroSensor gyro2;
+ColorSensor color1, color4; //color1 is left sensor, color4 is right sensor
+Timer timer1, timer2;
+double mSum, mPos, mDiff, mD, mDP1, mDP2, mDP3, Cstr, Cdrv, d_o, gAng, pwr, st, Cstr, gMn, gMx, gOS1, gSum, gSpd, gyro, cLo, tInt, lpwr, rpwr;
+bool ok;
+
+//reset all motors and sensors
+void RST() {
+	A.reset();
+	D.reset();
+	gyro2.reset();
+	timer2.reset();
+	mSum = 0;
+	mPos = 0;
+	mD = 0;
+	mDP1 = 0;
+	mDP2 = 0;
+	mDP3 = 0;
+	Cdrv = 0;
+	d_o = 0;
+	gAng = 0;
+	pwr = 0;
+	st = 0;
+	Cstr = 0;
+	ok = false;
+}
+
+//checks how still the robot is
+void gOS() {
+	//loop OSL
+	do {
+		gMn = 1000;
+		gMx = -1000;
+		gSum = 0;
+		int count = 0;
+		//loop gChk
+		do {
+			gyro = gyro2.rate();
+			gSum += gyro;
+			if (gyro > gMx) gMx = gyro;
+			if (gyro < gMn) gMn = gyro;
+			system.pause(0.004); //pause for 0.004 seconds
+			count++;
+		} while (count < 200);
+	} while (gMx - gMn >= 2);
+	gOS1 = gSum / 200;
+}
+
+//calculates time interval based on timer and loop count
+void GT() {
+	if (cLo == 0) {
+		tInt = 0.014;
+		timer1.reset;
+	}
+	else tInt = timer1.elaspedTime() / cLo;
+	cLo++;
+}
+
+//create dynamic offset of gyro sensor
+void GG() {
+	double tmp = gyro2.rate();
+	gOS1 = 0.0005 * tmp + (1 - 0.0005) * gOS1;
+	gSpd = tmp - gOS1;
+	gAng = gAng + gSpd * tInt;
+}
+
+//gets information from motors
+void GM() {
+	double degreeA = A.degree();
+	double degreeD = D.degree();
+	double oldmSum = mSum;
+	mSum = degreeA + degreeD;
+	mDiff = degreeD - degreeA;
+	mD = mSum - oldmSum;
+	mPos += mD;
+	mSpd = ((mD + mDP1 + mDP2 + mDP3) / 4) / tInt;
+	mDP3 = mDP2;
+	mDP2 = mDP1;
+	mDP1 = mD;
+}
+
+//create pwr to balance robot
+void EQ() {
+	mPos = mPos - tInt * Cdrv;
+	pwr = -0.01 * Cdrv + (0.08 * mSpd + 0.12 * mPos) + (0.8 * gSpd + 15 * gAng);
+	if (pwr > 100) pwr = 100;
+	else if (pwr < -100) pwr = -100;
+}
+
+//control the robot
+void cntrl(double& lpwr, double& rpwr) {
+	mPos -= (Cdrv * tInt);
+	rpwr = pwr + Cstr * 0.1;
+	lpwr = pwr - Cstr * 0.1;
+}
+
+//checks if the robot has fallen
+void CHK() {
+	if (abs(pwr) < 100) timer2.reset();
+	if (timer2.seconds() > 1) ok = true;
+}
+
+//main thread for balancing
+void M() {
+	RST(); //reset all motors and sensors
+	gOS(); //checks how still the robot is
+	gAng = -0.25;
+	st = 1;
+
+	//loop BAL
+	//takes data from gyro and motor to balance
+	do {
+		GT(); //calculates time interval based on timer and loop count
+		oldTime = timer1.elaspedTime();
+		GG(); //create dynamic offset of gyro sensor
+		GM(); //gets information from motors
+		EQ(); //create pwr to balance robot
+		cntrl(lpwr, rpwr); //control the robot
+		A.setPower(lpwr);
+		D.setPower(rpwr);
+		CHK(); //checks if the robot has fallen
+		system.pause(0.005 - (timer1.elaspedTime() - oldTime));
+	} while (!ok);
+	A.stop();
+	D.stop();
+	st = 0;
+}
+
+//follow black line 
+void LINE() {
+	while (!(color1.color() == COLOR_FINISHED && color4.color() == COLOR_FINISHED)) {
+		Cdrv = 150;
+		if (color4.color() == COLOR_BLACK) Cstr = -100;
+		else if (color1.color() == COLOR_BLACK) Cstr = 100;
+		else Cstr = 0;
+	}
+	Cdrv = 0;
+}
